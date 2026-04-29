@@ -86,17 +86,27 @@ export default function App() {
   },[checked]);
 
   const callAI = async () => {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method:"POST",
-      headers:{
-        "Content-Type":"application/json",
-        "Authorization":"Bearer YOUR_API_KEY"
+    const res = await fetch("https://api.deepseek.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "sk-79095496c61c4504a6b74f339d821067"
       },
       body: JSON.stringify({
-        model:"gpt-4o-mini",
-        messages:[{role:"user",content:`请用中文回答：${aiInput}`}]
+        model: "deepseek-chat",
+        messages: [
+          {
+            role: "system",
+            content: "你是一个日语学习助手，擅长N3到N1备考，回答要简洁清晰，用中文解释。"
+          },
+          {
+            role: "user",
+            content: aiInput
+          }
+        ]
       })
     });
+
     const data = await res.json();
     setAiOutput(data.choices?.[0]?.message?.content || "无返回");
   };
