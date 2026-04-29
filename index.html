@@ -1,0 +1,161 @@
+import React, { useState, useEffect, useMemo } from "react";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+
+// ===== 假日（可扩展）=====
+const HOLIDAYS = new Set([
+  "2026-05-01","2026-05-02","2026-05-03",
+  "2026-10-01","2026-10-02","2026-10-03","2026-10-04","2026-10-05","2026-10-06","2026-10-07"
+]);
+
+function generateDates() {
+  const start = new Date("2026-05-01");
+  const end = new Date("2026-12-01");
+  const dates = [];
+
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const iso = d.toISOString().split("T")[0];
+    const day = d.getDay();
+
+    let type = "weekday";
+    if (HOLIDAYS.has(iso)) type = "holiday";
+    else if (day === 6) type = "saturday";
+    else if (day === 0) type = "sunday";
+    else if (day === 2 || day === 4) type = "class";
+
+    let phase = "基础";
+    const m = d.getMonth() + 1;
+    if (m >= 7 && m <= 8) phase = "N3→N2";
+    if (m >= 9 && m <= 10) phase = "N2→N1";
+    if (m === 11) phase = "冲刺";
+
+    dates.push({ date: iso, type, phase });
+  }
+  return dates;
+}
+
+const tasks = {
+  weekday: ["08:50 听力","12:00 单词","20:00 课本","22:00 N5","22:30 N3","23:40 听力"],
+  class: ["08:50 听力","12:00 单词","19:30 上课","22:15 N5","22:45 N3"],
+  saturday: ["09:00 课本","13:30 N3","16:00 单词","19:30 上课"],
+  sunday: ["09:00 收尾","14:00 精读","20:00 预习"],
+  holiday: ["轻量复习","听力","休息"]
+};
+
+export default function App() {
+  const dates = useMemo(() => generateDates(), []);
+  const [checked, setChecked] = useState({});
+  const [month, setMonth] = useState("2026-05");
+  const [aiInput, setAiInput] = useState("");
+  const [aiOutput, setAiOutput] = useState("");
+
+  useEffect(() => {
+    const saved = JSON.parse(localStorage.getItem("jp_check") || "{}");
+    setChecked(saved);
+  }, []);
+
+  const toggle = (key) => {
+    const updated = { ...checked, [key]: !checked[key] };
+    setChecked(updated);
+    localStorage.setItem("jp_check", JSON.stringify(updated));
+  };
+
+  const currentDates = dates.filter(d => d.date.startsWith(month));
+
+  const weekly = useMemo(() => {
+    const map = {};
+    dates.forEach(d => {
+      const m = d.date.slice(0,7);
+      const total = tasks[d.type].length;
+      const done = tasks[d.type].filter((_,i)=>checked[d.date+i]).length;
+      if (!map[m]) map[m] = { total:0, done:0 };
+      map[m].total += total;
+      map[m].done += done;
+    });
+    return Object.entries(map).map(([k,v])=>({ name:k, rate: v.total?Math.round(v.done/v.total*100):0 }));
+  },[checked,dates]);
+
+  const worst = useMemo(()=>{
+    let min=101, day="-";
+    dates.forEach(d=>{
+      const total=tasks[d.type].length;
+      const done=tasks[d.type].filter((_,i)=>checked[d.date+i]).length;
+      const rate=total?done/total*100:0;
+      if(rate<min){min=rate;day=d.date}
+    });
+    return {day,rate:Math.round(min)};
+  },[checked]);
+
+  const callAI = async () => {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "Authorization":"Bearer YOUR_API_KEY"
+      },
+      body: JSON.stringify({
+        model:"gpt-4o-mini",
+        messages:[{role:"user",content:`请用中文回答：${aiInput}`}]
+      })
+    });
+    const data = await res.json();
+    setAiOutput(data.choices?.[0]?.message?.content || "无返回");
+  };
+
+  return (
+    <div className="p-4 max-w-md mx-auto">
+      <h1 className="text-xl font-bold mb-2">N1打卡系统</h1>
+
+      {/* 月份切换 */}
+      <div className="flex gap-2 mb-3">
+        {['2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12'].map(m=>(
+          <button key={m} onClick={()=>setMonth(m)} className={`px-2 py-1 rounded ${month===m?'bg-black text-white':'border'}`}>
+            {m.slice(5)}月
+          </button>
+        ))}
+      </div>
+
+      {/* 图表 */}
+      <div className="h-32 mb-4">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={weekly}>
+            <XAxis dataKey="name" />
+            <YAxis />
+            <Tooltip />
+            <Line type="monotone" dataKey="rate" />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="text-sm mb-3">📉 摆烂日：{worst.day}（{worst.rate}%）</div>
+
+      {/* 日历列表 */}
+      {currentDates.map(d=>(
+        <div key={d.date} className="mb-3 p-3 border rounded-xl">
+          <div className="font-semibold">{d.date} {d.type==='holiday'?'🎉':''}</div>
+          {tasks[d.type].map((t,i)=>{
+            const key=d.date+i;
+            return (
+              <div key={i} className="flex gap-2">
+                <input type="checkbox" checked={checked[key]||false} onChange={()=>toggle(key)} />
+                <span>{t}</span>
+              </div>
+            )
+          })}
+        </div>
+      ))}
+
+      {/* AI */}
+      <div className="mt-6 p-3 border rounded-xl">
+        <div className="font-bold mb-2">🤖 AI学习助手</div>
+        <textarea className="w-full border p-2 mb-2" placeholder="输入问题（中文即可）" value={aiInput} onChange={e=>setAiInput(e.target.value)} />
+        <button onClick={callAI} className="bg-black text-white px-3 py-1 rounded">提问</button>
+        <div className="mt-2 text-sm whitespace-pre-wrap">{aiOutput}</div>
+      </div>
+
+      {/* 提醒说明 */}
+      <div className="mt-4 text-xs text-gray-500">
+        ⏰ 提醒：建议接入 Telegram Bot / 邮件（需后端，我可帮你）
+      </div>
+    </div>
+  );
+}
